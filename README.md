@@ -9,6 +9,7 @@ Currently, the tool handles a few common cases, but additional work is needed to
     - import_path: full path to file to import, including file extension. Example: 'D:/folder/file.json'
     - export_path: full path to file to export, including file extension. Example: 'D:/folder/file.csv'
 - There are additional parameters with explanation in source, but the defaults should do for most cases.
+- Run with Python3.
 
 ## Requirements
 - Python interpreter 3.8.5 and above
