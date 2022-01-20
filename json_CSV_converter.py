@@ -177,6 +177,7 @@ def import_csv_from_disk(filepath, headers=None):
 
 
 def export_data_to_disk(filepath, data, delimiter=',', headers=None,
+                        headers_auto_method='1st_item',
                         trim_long_strings=False):
     """Routes export task to appropriate function depending on file type.
 
@@ -194,7 +195,10 @@ def export_data_to_disk(filepath, data, delimiter=',', headers=None,
             Desired delimiter to use for CSV export, by default ','
         headers : list, optional
             List containing the fieldnames (column names) for the exported CSV,
-            by default None
+            by default None,
+        headers_auto_method : str, optional
+            If headers is None, then the auto-method determines how the headers
+            will be populated, by default '1st_item'
         trim_long_strings : bool, optional
             Trim strings that exceed Excel cell char limit. Only pertinent for
             CSV exports, by default False"""
@@ -205,7 +209,7 @@ def export_data_to_disk(filepath, data, delimiter=',', headers=None,
         export_json_data_to_disk(filepath, data)
     elif extension=='.csv':
         export_csv_data_to_disk(filepath, data, delimiter, headers,
-                                trim_long_strings)
+                                headers_auto_method, trim_long_strings)
     else:
         sys.exit(
                 "Exports can only be made to .json and .csv formats."
@@ -268,7 +272,7 @@ def enforce_excel_cell_string_limit(long_string, limit):
 
 
 def export_csv_data_to_disk(filepath, data, delimiter=',',
-    headers=None, trim_long_strings=None,):
+    headers=None, headers_auto_method='1st_item', trim_long_strings=None,):
     """Exports a collection of dictionaries, or a single dictionary to a CSV
         file on disk.
 
@@ -315,6 +319,9 @@ def export_csv_data_to_disk(filepath, data, delimiter=',',
         headers : list, optional
             List containing the fieldnames (column names) for the exported CSV,
             by default None, by default None
+        headers_auto_method : str, optional
+            If headers is None, then the auto-method determines how the headers
+            will be populated, by default '1st_item'
         trim_long_strings : bool, optional
             If True, will trim strings that exceed Excel cell char limit,
             by default None"""
@@ -329,8 +336,12 @@ def export_csv_data_to_disk(filepath, data, delimiter=',',
 
     to_export_data = copy.deepcopy(data)
 
-    if headers is None:
-        if isinstance(to_export_data, dict):
+    dir = Path(filepath).parents[0]
+    if not dir.exists():
+        Path(dir).mkdir(parents=True, exist_ok=False)
+
+    if isinstance(to_export_data, dict):
+        if headers is None:
             # If we have a nested dictionary:
             if isinstance(list(to_export_data.values())[0], dict):
                 for k,v in to_export_data.items():
@@ -353,8 +364,24 @@ def export_csv_data_to_disk(filepath, data, delimiter=',',
                         temp_data.append({headers[0]:k, headers[1]:v})
                 to_export_data = temp_data
 
-        elif isinstance(to_export_data, list):
-            headers = [key for key in data[0]]
+    elif isinstance(to_export_data, list):
+        if headers is None:
+            headers = []
+            if headers_auto_method=='1st_item':
+                headers = [key for key in data[0]]
+            if headers_auto_method == 'keys_union':
+                item_headers = [[*item] for item in to_export_data]
+                # This preserves order encountered.
+                for item in item_headers:
+                    for h in item:
+                        if h not in headers:
+                            headers.append(h)
+                # More elegant, but does not preserver order encountered.
+                #headers = set.union(*map(set, item_headers))
+            if headers_auto_method == 'keys_intersection':
+                item_headers = [[*item] for item in to_export_data]
+                headers = set.intersection(*map(set, item_headers))
+
 
     # Export the collection.
     with open(filepath, 'w', encoding='utf-8', errors='replace',
@@ -370,8 +397,8 @@ def export_csv_data_to_disk(filepath, data, delimiter=',',
             out_writer.writerow(item)
 
 
-def convert_file(import_path, export_path, headers, delimiter,
-                 trim_long_string):
+def convert_file(import_path, export_path, headers, headers_auto_method,
+                 delimiter, trim_long_string):
 
     imported_data = import_data_from_disk(
         filepath=import_path,
@@ -382,6 +409,7 @@ def convert_file(import_path, export_path, headers, delimiter,
         filepath=export_path,
         data=imported_data,
         headers=headers,
+        headers_auto_method=headers_auto_method,
         delimiter=delimiter,
         trim_long_strings=trim_long_string
     )
@@ -390,9 +418,9 @@ def convert_file(import_path, export_path, headers, delimiter,
 def main():
     # SET THESE
     # import_path: full path to file to import, including file extension.
-    import_path = "D:/item.json"
+    import_path = "D:/ASM_Culvert_Inspection_20220119_data.json"
     # export_path: full path to file to export, including file extension.
-    export_path = "D:/new_dir/item.csv"
+    export_path = "D:/ASM_Culvert_Inspection_20220119_data.csv"
 
     # ADDITIONAL PARAMS, TYPICALLY NOT NEEDED
     # headers:
@@ -401,15 +429,28 @@ def main():
     # Otherwise, if the first row of the CSV contains data (i.e., there are no
     # headers in the CSV file), specify them as a list, like this:
     # ['name', 'colour', 'code'] etc.
+
     # WHEN THE EXPORTED FILE IS A CSV, 'headers' determines the names of the
     # fields that will be written in the CSV's first row. If left to 'None'
     # these will be taken from the keys of the JSON file.
 
-    # If a row has more fields than the headers, the remaining data will be
-    # ignored. If a non-blank row has fewer fields than headers, the missing
-    # values are filled-in with 'None'.
+    # If the headers are explicitly provided and a row has more fields than the
+    # headers, the remaining data will be ignnored. If a non-blank row has fewer
+    # fields than headers, the missing values are filled-in with 'None'.
     # By default, 'None'
+
+    # If 'headers=None', then the way headers will be determined when exporting
+    # a CSV depends on the 'headers_auto_method' chosen. To explain with an
+    # example:
+    # Assume this JSON array containing two dictionary items:
+    # [ {k1: "", k2, "", k3, ""}, {k1: "", k4: ""}]
+    # If headers_auto_method=="1st_item", headers = [k1, k2, k3]
+    # If headers_auto_method=="keys_union", headers = [k1, k2, k3, k4]
+    # If headers_auto_method=="keys_intersection", headers = [k1]
+
     headers=None
+    # one of: '1st_item', 'keys_union', 'keys_intersection'
+    headers_auto_method = 'keys_union'
 
     # deilimiter: The delimiter to separate values when exporting a CSV, by
     # default ','.
@@ -424,6 +465,7 @@ def main():
         import_path=import_path,
         export_path=export_path,
         headers=headers,
+        headers_auto_method=headers_auto_method,
         delimiter=delimiter,
         trim_long_string=trim_long_string
     )
